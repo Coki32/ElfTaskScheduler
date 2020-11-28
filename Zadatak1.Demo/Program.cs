@@ -12,27 +12,23 @@ namespace Zadatak1.Demo
     {
         static void Test1()
         {
-            void pisiNPuta(ElfTaskData etd, int id, int n)
+            void uzmiICekaj(string sta, int koliko, ElfTaskData etd)
             {
-                for (int i = 0; i < n; i++)
+                etd.TakeResource(sta, (ref dynamic res) =>
                 {
-                    etd.Pause();
-                    Console.WriteLine($"{id} ===> {i}");
-                    Thread.Sleep(500);
-                }
-                Console.WriteLine($"[{id}] zavrsio");
+                    Console.WriteLine($"Uzeo sam {sta} i cekam {koliko}ms");
+                    Thread.Sleep(koliko);
+                    Console.WriteLine($"Pustam {sta} nakon {koliko}ms");
+                });
             }
-            //TaskFactory tf = new TaskFactory(new ElfTaskScheduler(2, true, true));
-            //tf.StartNew(() => pisiNPuta(1, 5));
-            //tf.StartNew(() => pisiNPuta(2, 10));
-            //tf.StartNew(() => pisiNPuta(3, 5));
-
             ElfTaskScheduler ets = new ElfTaskScheduler(3, true, true);
-            ets.ScheduleTask(td => pisiNPuta(td, 1, 5), 10);
-            ets.ScheduleTask(td => pisiNPuta(td, 2, 15), 10);
-            ets.ScheduleTask(td => pisiNPuta(td, 3, 5), 10);
-            ets.ScheduleTask(td => pisiNPuta(td, 4, 5), 10);
-
+            ets.ScheduleTask(td => uzmiICekaj("blabla", 2000, td));
+            ets.ScheduleTask(td => uzmiICekaj("blabla2", 2000, td));
+            ets.ScheduleTask(td => uzmiICekaj("blabla", 2000, td));
+            ets.ScheduleTask(td => uzmiICekaj("blabla2", 2000, td));
+            ets.ScheduleTask(td => uzmiICekaj("blabla3", 2000, td));
+            ets.ScheduleTask(td => uzmiICekaj("blabla2", 2000, td));
+            ets.RefreshTasks();
             Thread.Sleep(60000);
 
         }

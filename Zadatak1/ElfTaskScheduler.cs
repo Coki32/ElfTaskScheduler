@@ -57,7 +57,7 @@ namespace Zadatak1
         /// <param name="maxThreadCount">Maximum of tasks to be executed at the same time at any given moment</param>
         /// <param name="isPreemptive">Specifies if the scheduled should preemptively swap in tasks with higher priority</param>
         /// <param name="isRealtime">Specifies if the scheduler should schedule new tasks as soon as threads become avilable or not</param>
-        /// <param name="commonTimeLimit">If a positive number is passed it then all tasks must complete before given time, otherwise they're aborted. If the scheduler is realtime cleanup will happen periodically.</param>
+        /// <param name="commonTimeLimit">If a positive number is passed it then all tasks must complete before given time, otherwise they're aborted.</param>
         public ElfTaskScheduler(int maxThreadCount, bool isPreemptive = false, bool isRealtime = true, int commonTimeLimit = NoTimeLimit)
         {
             if (commonTimeLimit < 0)
@@ -76,7 +76,7 @@ namespace Zadatak1
         /// <param name="elfTask">Task to be executed. ElfTask receives a single parameter of type <code>ElfTaskData</code></param>
         /// <param name="priority">Priority of the task to be scheduled. Must be in range [0,20] (inclusive)</param>
         /// <param name="timeLimitMs">Time limit in milliseconds to wait before forecefully killing the task</param>
-        public void ScheduleTask(ElfTask elfTask, int priority, int timeLimitMs = NoTimeLimit)
+        public void ScheduleTask(ElfTask elfTask, int priority = DefaultPriority, int timeLimitMs = NoTimeLimit)
         {
             if (priority < MaxPriority || priority > MinPriority)
                 throw new ArgumentOutOfRangeException("priority", $"Prioroty must be in range [{MinPriority}-{MaxPriority}]");
@@ -259,7 +259,7 @@ namespace Zadatak1
 
         /// <summary>
         /// This is a disgusting hack, but it works. If someone used a TaskFactory with this
-        /// custom scheduler that task gets wrapped up and passed as a normal task. Tasks passed
+        /// custom scheduler that task gets wrapped up and passed as a normal ElfTask. Tasks passed
         /// by TaskFactory have no priority so they're assigned DefaultPriority. They also
         /// don't have execution time limit so they will respect global limit passed to the constructor
         /// </summary>

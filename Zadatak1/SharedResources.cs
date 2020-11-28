@@ -1,42 +1,57 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using static Zadatak1.ElfTaskData;
 
 namespace Zadatak1
 {
-    public class SharedResources
+    /// <summary>
+    /// Class provides a single method used for consuming resources
+    /// shared between different tasks. It does locking and unlocking 
+    /// and notifies who is holding which resource
+    /// </summary>
+    class SharedResources
     {
-        //cuvas ih kao ime, (Tip, vrijednost)
-        private static Dictionary<string, (Type, object)> _globals = new Dictionary<string, (Type, object)>();
-
-        public static T ReadValue<T>(string name)
+        private static Dictionary<string, dynamic> _globals = new Dictionary<string, dynamic>();
+        private static List<object> locks = new List<object>();
+        private static List<string> names = new List<string>();
+        public static void UseResource(string name, ResourceConsumer action, ElfTaskData etd)
         {
-            lock (_globals)
+            try
             {
-                if (_globals.ContainsKey(name))
-                    return (T)Convert.ChangeType(_globals[name].Item2, _globals[name].Item1);
-                else
-                    return default(T);
+                int lockId = -1;
+                lock (names) lock(locks) //lock both cause I don't want anyone messing with lists while editing
+                {
+                    if (!names.Contains(name))
+                    {
+                        names.Add(name);
+                        locks.Add(new object());
+                        lockId = names.Count - 1;
+                    }
+                    else
+                        lockId = names.IndexOf(name);
+                }
+                lock (locks[lockId])//Guess I can't lock on elements of a Dictionary so this is the "solution"
+                {
+                    etd.TakenResource(name);//flag it as taken
+                    //Make sure that the name exists before accessing it
+                    if (!_globals.ContainsKey(name))
+                        _globals[name] = new object();
+                    dynamic res = _globals[name];
+                    action(ref res);
+                    _globals[name] = res;
+                }
+            }
+            finally//make sure we flag it as released in case scheduler wants to know
+            {
+                etd.ReleasedResource(name);
             }
         }
 
-        public static void WriteValue(string name, Type type, object value)
-        {
-            lock (_globals)
-            {
-                _globals[name] = (type, value);
-            }
-        }
+    }
 
-        public static void WriteValue(string name, object input)
-        {
-            var parsed = ParseInputVariable(input);
-            WriteValue(name, parsed.Item1, parsed.Item2);
-        }
+    public class Resource
+    {
 
-        public static (Type, object) ParseInputVariable(object input)
-        {
-            return (input.GetType(), input);
-        }
     }
 }
