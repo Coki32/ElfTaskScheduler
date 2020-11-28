@@ -12,20 +12,28 @@ namespace Zadatak1.Demo
     {
         static void Test1()
         {
-            void pisiNPuta(int id, int n)
+            void pisiNPuta(ElfTaskData etd, int id, int n)
             {
                 for (int i = 0; i < n; i++)
                 {
+                    etd.Pause();
                     Console.WriteLine($"{id} ===> {i}");
                     Thread.Sleep(500);
                 }
+                Console.WriteLine($"[{id}] zavrsio");
             }
-            TaskFactory tf = new TaskFactory(new ElfTaskScheduler(10, true, true));
-            tf.StartNew(() => pisiNPuta(1, 5));
-            tf.StartNew(() => pisiNPuta(2, 10));
-            tf.StartNew(() => pisiNPuta(3, 5));
+            //TaskFactory tf = new TaskFactory(new ElfTaskScheduler(2, true, true));
+            //tf.StartNew(() => pisiNPuta(1, 5));
+            //tf.StartNew(() => pisiNPuta(2, 10));
+            //tf.StartNew(() => pisiNPuta(3, 5));
 
-            Thread.Sleep(6000);
+            ElfTaskScheduler ets = new ElfTaskScheduler(3, true, true);
+            ets.ScheduleTask(td => pisiNPuta(td, 1, 5), 10);
+            ets.ScheduleTask(td => pisiNPuta(td, 2, 15), 10);
+            ets.ScheduleTask(td => pisiNPuta(td, 3, 5), 10);
+            ets.ScheduleTask(td => pisiNPuta(td, 4, 5), 10);
+
+            Thread.Sleep(60000);
 
         }
         static void Main(string[] args)

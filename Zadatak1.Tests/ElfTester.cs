@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Zadatak1.Tests
 {
@@ -12,7 +14,7 @@ namespace Zadatak1.Tests
         public void AllAreScheduled()
         {
             //nonrealtime, nonpreemptive scheduler with no time limit
-            ElfTaskScheduler ets = new ElfTaskScheduler(1,false,false,-1);
+            ElfTaskScheduler ets = new ElfTaskScheduler(1,false,false);
             int[] testPriorities = new int[] { 5, 15, 5, 12, 13, 12 };
             foreach (int tp in testPriorities)
                 ets.ScheduleTask((td) => { }, tp);
@@ -22,7 +24,7 @@ namespace Zadatak1.Tests
         [TestMethod]
         public void ScheduledInCorrectOrder()
         {
-            ElfTaskScheduler ets = new ElfTaskScheduler(1, false, false, -1);
+            ElfTaskScheduler ets = new ElfTaskScheduler(1, false, false);
             List<int> testPriorities = new List<int> { 5, 15, 5, 12, 13, 12 };
             foreach (int tp in testPriorities)
                 ets.ScheduleTask((td) => { }, tp);
@@ -31,6 +33,23 @@ namespace Zadatak1.Tests
             {
                 Assert.AreEqual(testPriorities[i], ets.GetPendingPriorities()[i]);
             }
+        }
+
+        [TestMethod]
+        public void NoMissedTasks()
+        {
+            const int schedulerThreadCount = 5;
+            const int spawnerThreadCount = 100;//Spawn 100 tasks from different threads
+            const int taskTimeout = 10;
+            ElfTaskScheduler ets = new ElfTaskScheduler(schedulerThreadCount, false, false);
+            List < Thread > spawners = Enumerable.Range(0, spawnerThreadCount).Select(i => new Thread(() => ets.ScheduleTask((td) => Task.Delay(taskTimeout).Wait(), ElfTaskScheduler.DefaultPriority))).ToList();
+            foreach (var t in spawners)
+                t.Start();
+            foreach (var t in spawners)
+                t.Join();
+            ets.RefreshTasks();
+            Assert.AreEqual(ets.CurrentlyRunning, schedulerThreadCount);//some are running
+            Assert.AreEqual(ets.CurrentlyPending, spawnerThreadCount-schedulerThreadCount);//the rest are pending
         }
     }
 }

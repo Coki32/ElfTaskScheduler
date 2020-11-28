@@ -13,9 +13,16 @@ namespace Zadatak1
         public int Priority { get; internal set; }
         public ElfTaskData(int priority, bool isPaused = false) => (PauseToken, Priority, IsPaused) = (new ManualResetEventSlim(), priority, isPaused);
         public void Cancel() => IsCanceled = true;
+
+        /// <summary>
+        /// Used to block the task from resuming work, the user is supposed to
+        /// check the IsPaused property before calling this method. I don't trust the user to do that so
+        /// The method will perform a double check
+        /// </summary>
         public void Pause()
         {
-            PauseToken.Wait();
+            if(IsPaused)
+                PauseToken.Wait();
         }
     }
 }

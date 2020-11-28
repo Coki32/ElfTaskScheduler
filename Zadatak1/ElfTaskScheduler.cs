@@ -12,7 +12,7 @@ namespace Zadatak1
         //Mora biti elfTask
         public delegate void ElfTask(ElfTaskData taskData);
 
-        private delegate void CleanupDelegate();
+        //private delegate void CleanupDelegate();
         private class PendingTaskInfo
         {
             public ElfTask Task;
@@ -20,33 +20,21 @@ namespace Zadatak1
             public int Priority;
         }
 
-        /**
-         * Task priority is an integer in range [0, 20]
-         * Lower number indicates a higher priority
-         */
+        /// <summary>
+        /// Task priority is an integer [0-20] where higher number indicates
+        /// lower priority. Default priority is 10.
+        /// </summary>
         public const int MaxPriority = 0;
         public const int MinPriority = 20;
+        public const int DefaultPriority = (MinPriority - MaxPriority) / 2;
 
-        public const int NoTimeLimit = -1;
-
+        public const int NoTimeLimit = 0;
 
         private List<PendingTaskInfo> PendingElfTasks { get; set; } = new List<PendingTaskInfo>();
 
         private List<(ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask)> PausedTasks { get; set; } = new List<(ElfTask, ElfTaskData, Task, Task)>();
 
         private (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask)?[] RunningTasks { get; set; }
-
-
-        /// <summary>
-        /// PendingRawTasks are used with QueueTask() methods to ensure FCFS execution of tasks when used 
-        /// in combination with a TaskFactory
-        /// </summary>
-        private List<Task> PendingRawTasks { get; set; } = new List<Task>();
-
-        private int RawTasksRunning { get; set; } = 0;
-
-        [ThreadStatic]
-        private bool isActive;
 
         public int MaxTaskCount { get => RunningTasks.Length; }
 
@@ -55,11 +43,13 @@ namespace Zadatak1
         /// <summary>
         /// Total number of currently running tasks, including both raw tasks and properly scheduled tasks
         /// </summary>
-        public int CurrentlyRunning { get => RunningTasks.Where(rt => rt.HasValue).Count() + RawTasksRunning; }
+        public int CurrentlyRunning { get => RunningTasks.Where(rt => rt.HasValue).Count(); }
 
         public bool IsPreemptive { get; private set; }
 
         public bool IsRealtime { get; private set; }
+
+        public int GlobalTimeLimit { get; private set; }
 
         /// <summary>
         /// Creates a new instance of ElfTaskScheduler class
@@ -70,10 +60,14 @@ namespace Zadatak1
         /// <param name="commonTimeLimit">If a positive number is passed it then all tasks must complete before given time, otherwise they're aborted. If the scheduler is realtime cleanup will happen periodically.</param>
         public ElfTaskScheduler(int maxThreadCount, bool isPreemptive = false, bool isRealtime = true, int commonTimeLimit = NoTimeLimit)
         {
-            ThreadPool.SetMinThreads(maxThreadCount, maxThreadCount);
+            if (commonTimeLimit < 0)
+                throw new ArgumentException("Time limit must be an integer greater than 0!", "commonTimeLimit");
+            if (maxThreadCount <= 0)
+                throw new ArgumentException("Task scheduler needs at least one thread to function!", "maxThreadCount");
             RunningTasks = new (ElfTask, ElfTaskData, Task, Task)?[maxThreadCount];
             IsPreemptive = isPreemptive;
             IsRealtime = isRealtime;
+            GlobalTimeLimit = commonTimeLimit;
         }
 
         /// <summary>
@@ -93,6 +87,8 @@ namespace Zadatak1
                 firstHigherPriority = PendingElfTasks.FindIndex(pt => pt.Priority > priority);
             if (firstHigherPriority == -1)// -1 ako su svi manji od njega (svi su veceg prioriteta)
                 firstHigherPriority = PendingElfTasks.Count;//zato ide na kraj
+            if (timeLimitMs == NoTimeLimit)
+                timeLimitMs = GlobalTimeLimit;
             PendingElfTasks.Insert(firstHigherPriority, new PendingTaskInfo() { Task = elfTask, DurationLimit = timeLimitMs, Priority = priority });
             if (IsRealtime)
                 RefreshTasks();
@@ -226,22 +222,22 @@ namespace Zadatak1
             return pt;
         }
 
-        private (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask) spawnNewTask(PendingTaskInfo pendingTaskInfo, CleanupDelegate cleanup = null)
+        private (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask) spawnNewTask(PendingTaskInfo pendingTaskInfo)
         {
             ElfTaskData taskData = new ElfTaskData(pendingTaskInfo.Priority);
             PendingElfTasks.Remove(pendingTaskInfo);
 
-            return (pendingTaskInfo.Task, taskData, Task.Factory.StartNew(() => { pendingTaskInfo.Task(taskData); RefreshTasks(); }),
-                Task.Factory.StartNew(() =>//task koji ga ubija prisilno
+            return (pendingTaskInfo.Task, taskData, Task.Factory.StartNew(() => { pendingTaskInfo.Task(taskData); if (IsRealtime) RefreshTasks(); }),
+                Task.Factory.StartNew(() =>//start a task that attempts to forcefully kill the scheduled task once it's time runs out
                 {
                     if (pendingTaskInfo.DurationLimit > 0)
                     {
                         Task.Delay(pendingTaskInfo.DurationLimit).Wait();
                         Console.WriteLine($"Task ostao bez vremena, ubijam ga!");
                         taskData.Cancel();
-                        RefreshTasks();
+                        if (IsRealtime)
+                            RefreshTasks();
                     }
-                    cleanup?.Invoke();//If additional cleanup is needed perform it when the task ends
                 }));
         }
 
@@ -250,38 +246,34 @@ namespace Zadatak1
             return PendingElfTasks.Select(pt => pt.Priority).ToArray();
         }
 
+        /// <summary>
+        /// It's a hack because tasks waiting don't actually have a Task associated
+        /// with them so I've mapped pending pending tasks into empty tasks to at least
+        /// return a correct number of tasks, if not the correct tasks themselves.
+        /// </summary>
+        /// <returns></returns>
         protected override IEnumerable<Task> GetScheduledTasks()
         {
-            return PendingElfTasks.Select(pt => new Task(() => pt.Task(null))).Union(PausedTasks.Select(pt => pt.executingTask)).Union(PendingRawTasks);
+            return PendingElfTasks.Select(pt => new Task(() => pt.Task(null))).Union(PausedTasks.Select(pt => pt.executingTask));
         }
+
+        /// <summary>
+        /// This is a disgusting hack, but it works. If someone used a TaskFactory with this
+        /// custom scheduler that task gets wrapped up and passed as a normal task. Tasks passed
+        /// by TaskFactory have no priority so they're assigned DefaultPriority. They also
+        /// don't have execution time limit so they will respect global limit passed to the constructor
+        /// </summary>
+        /// <param name="task"></param>
         protected override void QueueTask(Task task)
         {
-            lock (PendingRawTasks)
-                PendingRawTasks.Add(task);
-            Console.WriteLine($"[QUEUE]:RawRunning={RawTasksRunning}, Max={MaxTaskCount}, Total={CurrentlyRunning}");
-            ThreadPool.QueueUserWorkItem((state) =>
+            ScheduleTask((td) =>
             {
-                while (CurrentlyRunning > MaxTaskCount)
-                {
-                    Console.WriteLine("Guzva, cekam...");
-                    Task.Delay(25).Wait();
-                }
-                Console.WriteLine($"[{Thread.CurrentThread.ManagedThreadId}]:Ne cekam, vadim task");
-                Task todo = null;
-                lock (PendingRawTasks)
-                    if (PendingRawTasks.Count > 0)
-                        todo = PendingRawTasks[0];
-                Console.WriteLine($"[{Thread.CurrentThread.ManagedThreadId}]:izvadio task {task.ToString()}");
-                if (todo != null)
-                {
-                    RawTasksRunning++;
-                    Console.WriteLine($"[{Thread.CurrentThread.ManagedThreadId}]:TryExecute kaze {base.TryExecuteTask(todo)}");
-                    RawTasksRunning--;
-                }
-
-            });
-            //throw new InvalidOperationException("QueueTask nema prioritet, rasporedjivac zahtjeva prioritet!");
+                this.TryExecuteTask(task);//Ovo ce uraditi taj task, sad treba kad on zavrsi
+                if (IsRealtime)
+                    RefreshTasks();
+            }, DefaultPriority);
         }
+
         protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued)
         {
             if (task == null)
