@@ -12,22 +12,44 @@ namespace Zadatak1.Demo
     {
         static void Test1()
         {
-            void uzmiICekaj(string sta, int koliko, ElfTaskData etd)
+            void uzmiIPovecaj(string sta, ElfTaskData etd)
             {
                 etd.TakeResource(sta, (ref dynamic res) =>
                 {
-                    Console.WriteLine($"Uzeo sam {sta} i cekam {koliko}ms");
-                    Thread.Sleep(koliko);
-                    Console.WriteLine($"Pustam {sta} nakon {koliko}ms");
+                    Console.WriteLine($"Uzeo sam {sta}={res}");
+                    res += 1;
+                    Console.WriteLine($"Pustam {sta}={res}");
                 });
             }
-            ElfTaskScheduler ets = new ElfTaskScheduler(3, true, true);
-            ets.ScheduleTask(td => uzmiICekaj("blabla", 2000, td));
-            ets.ScheduleTask(td => uzmiICekaj("blabla2", 2000, td));
-            ets.ScheduleTask(td => uzmiICekaj("blabla", 2000, td));
-            ets.ScheduleTask(td => uzmiICekaj("blabla2", 2000, td));
-            ets.ScheduleTask(td => uzmiICekaj("blabla3", 2000, td));
-            ets.ScheduleTask(td => uzmiICekaj("blabla2", 2000, td));
+            void postaviNa0(string sta, ElfTaskData etd)
+            {
+                etd.TakeResource(sta, (ref dynamic res) =>
+                {
+                    if (!(res is int))
+                        res = 0;
+                });
+            }
+            ElfTaskScheduler ets = new ElfTaskScheduler(3, true, false);
+            ets.ScheduleTask(td => postaviNa0("n", td));
+            ets.RefreshTasks();
+            ets.ScheduleTask(td =>
+            {
+                for (int i = 0; i < 100; i++)
+                    uzmiIPovecaj("n", td);
+            });
+            ets.ScheduleTask(td =>
+            {
+                for (int i = 0; i < 100; i++)
+                    uzmiIPovecaj("n", td);
+            });
+            ets.ScheduleTask(td =>
+            {
+                Thread.Sleep(5000);
+                td.TakeResource("n", (ref dynamic res) =>
+                {
+                    Console.WriteLine($"Na kraju n={res}");
+                });
+            });
             ets.RefreshTasks();
             Thread.Sleep(60000);
 
