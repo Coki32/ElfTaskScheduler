@@ -80,6 +80,8 @@ namespace Zadatak1
         {
             if (priority < MaxPriority || priority > MinPriority)
                 throw new ArgumentOutOfRangeException("priority", $"Prioroty must be in range [{MinPriority}-{MaxPriority}]");
+            if (elfTask == null)
+                throw new ArgumentNullException("elfTask", "Task must not be null!");
             int firstHigherPriority;
             if (PendingElfTasks.Count == 0)
                 firstHigherPriority = 0;

@@ -42,7 +42,7 @@ namespace Zadatak1.Tests
             const int spawnerThreadCount = 100;//Spawn 100 tasks from different threads
             const int taskTimeout = 10;
             ElfTaskScheduler ets = new ElfTaskScheduler(schedulerThreadCount, false, false);
-            List < Thread > spawners = Enumerable.Range(0, spawnerThreadCount).Select(i => new Thread(() => ets.ScheduleTask((td) => Task.Delay(taskTimeout).Wait(), ElfTaskScheduler.DefaultPriority))).ToList();
+            List < Thread > spawners = Enumerable.Range(0, spawnerThreadCount).Select(i => new Thread(() => ets.ScheduleTask((td) => Task.Delay(taskTimeout).Wait()))).ToList();
             foreach (var t in spawners)
                 t.Start();
             foreach (var t in spawners)
