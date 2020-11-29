@@ -14,13 +14,15 @@ namespace Zadatak1
 
         public bool IsPaused { get; internal set; }
 
+        internal bool IsReallyFinished { get; set; } = false;
+
         public int Priority { get; internal set; }
 
         internal List<string> HeldResources { get; } = new List<string>();
         internal List<string> WantedResources { get; } = new List<string>();
 
-        public ElfTaskData(int priority, bool isPaused = false) => (Priority, IsPaused) = (priority, isPaused);
-        public void Cancel() => IsCanceled = true;
+        internal ElfTaskData(int priority, bool isPaused = false) => (Priority, IsPaused) = (priority, isPaused);
+        internal void Cancel() => IsCanceled = true;
 
         /// <summary>
         /// Used to block the task from resuming work, the user is supposed to

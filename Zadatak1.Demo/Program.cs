@@ -54,9 +54,57 @@ namespace Zadatak1.Demo
             Thread.Sleep(60000);
 
         }
+
+        static void Test2()
+        {
+            ElfTaskScheduler ets = new ElfTaskScheduler(2, true, true);
+            void RepetitiveSpam(ElfTaskData etd, string name, int n)
+            {
+                Console.WriteLine($"Pokrecem {name}");
+                for (int i = 0; i < n; ++i)
+                {
+                    if (etd.IsPaused)
+                        etd.Pause();
+                    if (etd.IsCanceled)
+                        break;
+                    Thread.Sleep(100);
+                    Console.WriteLine($"{name} does {i}. iteration");
+                }
+                Console.WriteLine($"{name} finished");
+            }
+            ets.ScheduleTask((etd) => RepetitiveSpam(etd, "First", 10), 18);
+            ets.ScheduleTask((etd) => RepetitiveSpam(etd, "Second", 10), 15);
+            Thread.Sleep(300);
+            Console.WriteLine("Starting third, it should preempt First");
+            ets.ScheduleTask((etd) => RepetitiveSpam(etd, "Third", 5), 5);
+            Thread.Sleep(15000);
+        }
+
+        static void Test3()
+        {
+            const string resourceName = "n";
+            void TakeAndIncrement(ElfTaskData etd, string name) => etd.TakeResource(name, (ref dynamic n) => n = (n is int) ? n + 1 : 1);
+            ElfTaskScheduler ets = new ElfTaskScheduler(3, true, true);
+            ets.ScheduleTask((etd) =>
+            {
+                for (int i = 0; i < 100; ++i)
+                    TakeAndIncrement(etd, resourceName);
+            });
+            ets.ScheduleTask((etd) =>
+            {
+                for (int i = 0; i < 100; ++i)
+                    TakeAndIncrement(etd, resourceName);
+            });
+            Thread.Sleep(200);//let first 2 tasks finish their work before printing total result due to lack of synchronization
+            ets.ScheduleTask((etd) =>
+            {
+                etd.TakeResource(resourceName, (ref dynamic n) => Console.WriteLine($"After they're both done working n is now {n}"));
+            });
+            Thread.Sleep(10000000);
+        }
         static void Main(string[] args)
         {
-            Test1();
+            Test3();
             return;
             ElfTaskScheduler elfTaskScheduler = new ElfTaskScheduler(2, true, false, -1);
 

@@ -50,8 +50,4 @@ namespace Zadatak1
 
     }
 
-    public class Resource
-    {
-
-    }
 }

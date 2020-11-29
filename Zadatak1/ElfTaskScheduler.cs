@@ -159,14 +159,15 @@ namespace Zadatak1
                         int lowestIndex = Array.IndexOf(RunningTasks, lowestPriorityRunning);
                         lowestPriorityRunning.Value.taskData.IsPaused = true;
                         lowestPriorityRunning.Value.taskData.PauseToken.Reset();
+                        Console.WriteLine($"LowestRunning={lowestPriorityRunning?.taskData.Priority}; pending={highestPriorityPending?.Priority}; paused={(highestPriorityPaused.taskData != null ? highestPriorityPaused.taskData.Priority:0)}");
                         if (highestPriorityPending != null && highestPriorityPaused.task == null)//easy case, spawn pending one instead of lowest priority one
-                            RunningTasks[lowestIndex] = spawnNewTask(highestPriorityPending);
+                            RunningTasks[lowestIndex] = SpawnNewTask(highestPriorityPending);
                         else if (highestPriorityPending == null && highestPriorityPaused.task != null)//also easy, resume the paused task in place of lowest prio
                             RunningTasks[lowestIndex] = ResumePausedTask(highestPriorityPaused);
                         else//neither is null, check which is higher priority
                         {
                             if (highestPriorityPending.Priority < highestPriorityPaused.taskData.Priority)
-                                RunningTasks[lowestIndex] = spawnNewTask(highestPriorityPending);
+                                RunningTasks[lowestIndex] = SpawnNewTask(highestPriorityPending);
                             else
                                 RunningTasks[lowestIndex] = ResumePausedTask(highestPriorityPaused);
                         }
@@ -188,15 +189,16 @@ namespace Zadatak1
                 {
                     if (!RunningTasks[i].HasValue)
                     {
-
                         int pausedPrio = PausedTasks.Count == 0 ? EmptyPriority : PausedTasks.OrderBy(pt => pt.taskData.Priority).ElementAt(0).taskData.Priority;
                         int pendingPrio = PendingElfTasks.Count == 0 ? EmptyPriority : PendingElfTasks[0].Priority;
                         if (pendingPrio < pausedPrio)
-                            RunningTasks[i] = spawnNewTask(PendingElfTasks[0]);
+                            RunningTasks[i] = SpawnNewTask(PendingElfTasks[0]);
                         else if (pausedPrio == pendingPrio && pausedPrio != EmptyPriority)//if they're equal, resume the one that had started earlier
                             RunningTasks[i] = ResumePausedTask(PausedTasks.OrderBy(pt => pt.taskData.Priority).ElementAt(0));
-                        else if (pendingPrio != EmptyPriority)//if pending is waiting and we didn't have paused tasks
-                            RunningTasks[i] = spawnNewTask(PendingElfTasks[0]);
+                        else if (pausedPrio != EmptyPriority)//if pending is waiting and we didn't have paused tasks
+                            RunningTasks[i] = ResumePausedTask(PausedTasks.OrderBy(pt => pt.taskData.Priority).ElementAt(0));
+                        else if (pendingPrio != EmptyPriority)
+                            RunningTasks[i] = SpawnNewTask(PendingElfTasks[0]);
                         else
                             break;//nothing to do, no pending, no paused tasks
                     }
@@ -211,7 +213,7 @@ namespace Zadatak1
                     if (RunningTasks[i].HasValue)
                     {
                         (_, ElfTaskData taskData, Task executingTask, _) = RunningTasks[i].Value;
-                        if (executingTask.IsCanceled || executingTask.IsCompleted || taskData.IsCanceled)
+                        if (executingTask.IsCanceled || executingTask.IsCompleted || taskData.IsCanceled || taskData.IsReallyFinished)
                             RunningTasks[i] = null;
                     }
         }
@@ -224,21 +226,24 @@ namespace Zadatak1
             return pt;
         }
 
-        private (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask) spawnNewTask(PendingTaskInfo pendingTaskInfo)
+        private (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask) SpawnNewTask(PendingTaskInfo pendingTaskInfo)
         {
             ElfTaskData taskData = new ElfTaskData(pendingTaskInfo.Priority);
             PendingElfTasks.Remove(pendingTaskInfo);
 
-            return (pendingTaskInfo.Task, taskData, Task.Factory.StartNew(() => { pendingTaskInfo.Task(taskData); if (IsRealtime) RefreshTasks(); }),
+            return (pendingTaskInfo.Task, taskData,
+                Task.Factory.StartNew(() => {
+                    pendingTaskInfo.Task(taskData);//start the actual main part
+                    taskData.IsReallyFinished = true;//some tasks finished without setting their appropriate flags, so this is a workaround
+                    RefreshTasks(); //also refresh
+                }),
                 Task.Factory.StartNew(() =>//start a task that attempts to forcefully kill the scheduled task once it's time runs out
                 {
                     if (pendingTaskInfo.DurationLimit > 0)
                     {
                         Task.Delay(pendingTaskInfo.DurationLimit).Wait();
-                        Console.WriteLine($"Task ostao bez vremena, ubijam ga!");
                         taskData.Cancel();
-                        if (IsRealtime)
-                            RefreshTasks();
+                        RefreshTasks();//when killing a task forcefully make sure you refresh tasks after you mark it as canceled
                     }
                 }));
         }
