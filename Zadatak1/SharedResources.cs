@@ -12,7 +12,7 @@ namespace Zadatak1
     /// </summary>
     class SharedResources
     {
-        private static Dictionary<string, dynamic> _globals = new Dictionary<string, dynamic>();
+        private static Dictionary<string, dynamic> globals = new Dictionary<string, dynamic>();
         private static List<object> locks = new List<object>();
         private static List<string> names = new List<string>();
         public static void UseResource(string name, ResourceConsumer action, ElfTaskData etd)
@@ -34,12 +34,13 @@ namespace Zadatak1
                 lock (locks[lockId])//Guess I can't lock on elements of a Dictionary so this is the "solution"
                 {
                     etd.TakenResource(name);//flag it as taken
+                    etd.WantedResources.Remove(name);//now that you have it, you no longer /WANT/ it
                     //Make sure that the name exists before accessing it
-                    if (!_globals.ContainsKey(name))
-                        _globals[name] = new object();
-                    dynamic res = _globals[name];
+                    if (!globals.ContainsKey(name))
+                        globals[name] = new object();
+                    dynamic res = globals[name];
                     action(ref res);
-                    _globals[name] = res;
+                    globals[name] = res;
                 }
             }
             finally//make sure we flag it as released in case scheduler wants to know

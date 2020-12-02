@@ -4,16 +4,17 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Threading;
+using System.Diagnostics;
 
 namespace Zadatak1
 {
-    public class ElfTaskScheduler : TaskScheduler
+    public class ElfTaskScheduler : TaskScheduler, IDisposable
     {
         //Mora biti elfTask
         public delegate void ElfTask(ElfTaskData taskData);
 
         //private delegate void CleanupDelegate();
-        private class PendingTaskInfo
+        internal class PendingTaskInfo
         {
             public ElfTask Task;
             public int DurationLimit;
@@ -30,19 +31,21 @@ namespace Zadatak1
 
         public const int NoTimeLimit = 0;
 
-        private List<PendingTaskInfo> PendingElfTasks { get; set; } = new List<PendingTaskInfo>();
+        public const int DeadlockCheckIntervalMs = 1000;//check for deadlocks every second
+        public const int DeadlockStopAfter = 10;//kill the application if it's been blocked for more than 5 CheckIntervals
 
-        private List<(ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask)> PausedTasks { get; set; } = new List<(ElfTask, ElfTaskData, Task, Task)>();
+        internal List<PendingTaskInfo> PendingElfTasks { get; private set; } = new List<PendingTaskInfo>();
 
-        private (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask)?[] RunningTasks { get; set; }
+        internal List<(ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask)> PausedTasks { get; private set; } = new List<(ElfTask, ElfTaskData, Task, Task)>();
+
+        internal (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask)?[] RunningTasks { get; private set; }
+
+        private DeadlockChecker DeadlockChecker { get; set; }
 
         public int MaxTaskCount { get => RunningTasks.Length; }
 
         public int CurrentlyPending { get => PendingElfTasks.Count; }
 
-        /// <summary>
-        /// Total number of currently running tasks, including both raw tasks and properly scheduled tasks
-        /// </summary>
         public int CurrentlyRunning { get => RunningTasks.Where(rt => rt.HasValue).Count(); }
 
         public bool IsPreemptive { get; private set; }
@@ -57,17 +60,19 @@ namespace Zadatak1
         /// <param name="maxThreadCount">Maximum of tasks to be executed at the same time at any given moment</param>
         /// <param name="isPreemptive">Specifies if the scheduled should preemptively swap in tasks with higher priority</param>
         /// <param name="isRealtime">Specifies if the scheduler should schedule new tasks as soon as threads become avilable or not</param>
-        /// <param name="commonTimeLimit">If a positive number is passed it then all tasks must complete before given time, otherwise they're aborted.</param>
-        public ElfTaskScheduler(int maxThreadCount, bool isPreemptive = false, bool isRealtime = true, int commonTimeLimit = NoTimeLimit)
+        /// <param name="globalTimeLimit">If a positive number is passed it then all tasks must complete before given time, otherwise they're aborted.</param>
+        public ElfTaskScheduler(int maxThreadCount, bool isPreemptive = false, bool isRealtime = true, int globalTimeLimit = NoTimeLimit)
         {
-            if (commonTimeLimit < 0)
+            if (globalTimeLimit < 0)
                 throw new ArgumentException("Time limit must be an integer greater than 0!", "commonTimeLimit");
             if (maxThreadCount <= 0)
                 throw new ArgumentException("Task scheduler needs at least one thread to function!", "maxThreadCount");
             RunningTasks = new (ElfTask, ElfTaskData, Task, Task)?[maxThreadCount];
             IsPreemptive = isPreemptive;
             IsRealtime = isRealtime;
-            GlobalTimeLimit = commonTimeLimit;
+            GlobalTimeLimit = globalTimeLimit;
+            DeadlockChecker = new DeadlockChecker(this, DeadlockCheckIntervalMs, DeadlockStopAfter);
+            DeadlockChecker.Start();
         }
 
         /// <summary>
@@ -87,8 +92,8 @@ namespace Zadatak1
                 firstHigherPriority = 0;
             else
                 firstHigherPriority = PendingElfTasks.FindIndex(pt => pt.Priority > priority);
-            if (firstHigherPriority == -1)// -1 ako su svi manji od njega (svi su veceg prioriteta)
-                firstHigherPriority = PendingElfTasks.Count;//zato ide na kraj
+            if (firstHigherPriority == -1)// -1 if all tasks are higher priority
+                firstHigherPriority = PendingElfTasks.Count;//so we drop it in the back
             if (timeLimitMs == NoTimeLimit)
                 timeLimitMs = GlobalTimeLimit;
             PendingElfTasks.Insert(firstHigherPriority, new PendingTaskInfo() { Task = elfTask, DurationLimit = timeLimitMs, Priority = priority });
@@ -96,22 +101,10 @@ namespace Zadatak1
                 RefreshTasks();
         }
 
-        //TODO: Ovo obrisi, samo test
-        public void ubijSve()
-        {
-            for (int i = 0; i < RunningTasks.Length; i++)
-            {
-                if (RunningTasks[i].HasValue)
-                {
-                    RunningTasks[i].Value.taskData.Cancel();
-                    RunningTasks[i] = null;
-                }
-            }
-        }
-
         /// <summary>
-        /// Metoda prerasporedjuje zadatke po prioritetu. Zbog toga sto je poziva cleanup task moguce je da vise Thread-ova istovremeno
-        /// pristupi clanovima RunningTasks i PendingTasks zato se zakljucavaju
+        /// Tries to schedule pending and paused tasks on available threads if there's something to be shceduled. It can be
+        /// called by users to force a refresh or it will be called after any task ends to signal that there's available 
+        /// threads to work with. Due to this, scheduling methods lock certain properties.
         /// </summary>
         public void RefreshTasks()
         {
@@ -131,8 +124,8 @@ namespace Zadatak1
         private void PreemptiveRefresh()
         {
             //It SHOULDNT happen that PendingTasks have higher priority than Paused tasks, but just to be sure
-            Func<int> lowestPriorityRunningValue = () => RunningTasks.Where(rt => rt.HasValue).Select(rt => rt.Value.taskData.Priority).DefaultIfEmpty(MaxPriority - 1).Max();
-            Func<bool> shouldPreempt = () =>//Any waiting task has higher priority (lower value)
+            int lowestPriorityRunningValue() => RunningTasks.Where(rt => rt.HasValue).Select(rt => rt.Value.taskData.Priority).DefaultIfEmpty(MaxPriority - 1).Max();
+            bool shouldPreempt()//Any waiting task has higher priority (lower value)
             {
                 int localLowest = lowestPriorityRunningValue();//local variable to avoid looping more than it's needed
                 return PendingElfTasks.Any(pt => pt.Priority < localLowest) || PausedTasks.Any(pt => pt.taskData.Priority < localLowest);
@@ -146,7 +139,7 @@ namespace Zadatak1
                 return;//I dislike the else under this if
             }
             //now all threads are busy, but there's something to be booted out
-            lock (this)
+            lock (this)//Lock everything as this loop will read and write to all task categories, Running, Pending and Paused
             {
                 while (shouldPreempt())
                 {
@@ -156,10 +149,11 @@ namespace Zadatak1
                     var highestPriorityPending = PendingElfTasks.Count == 0 ? null : PendingElfTasks[0];
                     if (lowestPriorityRunning.HasValue)//Free tasks are possible in case preemptive was called and some tasks finished
                     {//put lowest priority one to sleep
+
                         int lowestIndex = Array.IndexOf(RunningTasks, lowestPriorityRunning);
                         lowestPriorityRunning.Value.taskData.IsPaused = true;
                         lowestPriorityRunning.Value.taskData.PauseToken.Reset();
-                        Console.WriteLine($"LowestRunning={lowestPriorityRunning?.taskData.Priority}; pending={highestPriorityPending?.Priority}; paused={(highestPriorityPaused.taskData != null ? highestPriorityPaused.taskData.Priority:0)}");
+
                         if (highestPriorityPending != null && highestPriorityPaused.task == null)//easy case, spawn pending one instead of lowest priority one
                             RunningTasks[lowestIndex] = SpawnNewTask(highestPriorityPending);
                         else if (highestPriorityPending == null && highestPriorityPaused.task != null)//also easy, resume the paused task in place of lowest prio
@@ -183,7 +177,7 @@ namespace Zadatak1
         private void NonPreemptiveRefresh()
         {
             const int EmptyPriority = MinPriority + 1;//imposible priority
-            lock (this)//Znaci niko nicemu ne moze pristupiti dok se ovo radi
+            lock (this)//Same as with PreemptiveRefresh. Don't want some other thread modifying collections until the refresh is complete
             {
                 for (int i = 0; i < RunningTasks.Length; i++)
                 {
@@ -191,13 +185,13 @@ namespace Zadatak1
                     {
                         int pausedPrio = PausedTasks.Count == 0 ? EmptyPriority : PausedTasks.OrderBy(pt => pt.taskData.Priority).ElementAt(0).taskData.Priority;
                         int pendingPrio = PendingElfTasks.Count == 0 ? EmptyPriority : PendingElfTasks[0].Priority;
-                        if (pendingPrio < pausedPrio)
+                        if (pendingPrio < pausedPrio)//waiting task should go first, spawn it
                             RunningTasks[i] = SpawnNewTask(PendingElfTasks[0]);
                         else if (pausedPrio == pendingPrio && pausedPrio != EmptyPriority)//if they're equal, resume the one that had started earlier
                             RunningTasks[i] = ResumePausedTask(PausedTasks.OrderBy(pt => pt.taskData.Priority).ElementAt(0));
-                        else if (pausedPrio != EmptyPriority)//if pending is waiting and we didn't have paused tasks
+                        else if (pausedPrio != EmptyPriority)//they're not equal and pending isn't smaller but we have paused => resume the pused one
                             RunningTasks[i] = ResumePausedTask(PausedTasks.OrderBy(pt => pt.taskData.Priority).ElementAt(0));
-                        else if (pendingPrio != EmptyPriority)
+                        else if (pendingPrio != EmptyPriority)//this should be picked up by the first if, may be unreachable
                             RunningTasks[i] = SpawnNewTask(PendingElfTasks[0]);
                         else
                             break;//nothing to do, no pending, no paused tasks
@@ -208,8 +202,8 @@ namespace Zadatak1
 
         private void RemoveFinishedTasks()
         {
-            lock (RunningTasks)//Da ne bi jos neki cleanup task probao da cisti isto dva puta
-                for (int i = 0; i < RunningTasks.Length; i++)
+            lock (RunningTasks)//Block others from changing RunningTasks array while cleaning up
+                for (int i = 0; i < RunningTasks.Length; ++i)
                     if (RunningTasks[i].HasValue)
                     {
                         (_, ElfTaskData taskData, Task executingTask, _) = RunningTasks[i].Value;
@@ -223,19 +217,19 @@ namespace Zadatak1
             pt.taskData.PauseToken.Set();//reset the lock
             pt.taskData.IsPaused = false;
             PausedTasks.Remove(pt);//Once resumed it's safe to remove it from PausedTasks list
-            return pt;
+            return pt;//it's now "running" again
         }
 
         private (ElfTask task, ElfTaskData taskData, Task executingTask, Task cleanupTask) SpawnNewTask(PendingTaskInfo pendingTaskInfo)
         {
             ElfTaskData taskData = new ElfTaskData(pendingTaskInfo.Priority);
             PendingElfTasks.Remove(pendingTaskInfo);
-
             return (pendingTaskInfo.Task, taskData,
-                Task.Factory.StartNew(() => {
+                Task.Factory.StartNew(() => //construct the actual task to run
+                {
                     pendingTaskInfo.Task(taskData);//start the actual main part
                     taskData.IsReallyFinished = true;//some tasks finished without setting their appropriate flags, so this is a workaround
-                    RefreshTasks(); //also refresh
+                    RefreshTasks(); //also refresh after the task ends
                 }),
                 Task.Factory.StartNew(() =>//start a task that attempts to forcefully kill the scheduled task once it's time runs out
                 {
@@ -254,11 +248,10 @@ namespace Zadatak1
         }
 
         /// <summary>
-        /// It's a hack because tasks waiting don't actually have a Task associated
-        /// with them so I've mapped pending pending tasks into empty tasks to at least
-        /// return a correct number of tasks, if not the correct tasks themselves.
+        /// It's a hack because tasks waiting don't actually have a Task associated with them so I've mapped pending 
+        /// pending tasks into empty tasks to at least return a correct number of tasks, if not the correct tasks themselves.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>A collection of tasks currently waiting to be scheduled</returns>
         protected override IEnumerable<Task> GetScheduledTasks()
         {
             return PendingElfTasks.Select(pt => new Task(() => pt.Task(null))).Union(PausedTasks.Select(pt => pt.executingTask));
@@ -273,23 +266,28 @@ namespace Zadatak1
         /// <param name="task"></param>
         protected override void QueueTask(Task task)
         {
+#if DEBUG
+            Debug.WriteLine("Called QueueTask(Task) method!");
+#endif
             ScheduleTask((td) =>
             {
-                this.TryExecuteTask(task);//Ovo ce uraditi taj task, sad treba kad on zavrsi
-                if (IsRealtime)
-                    RefreshTasks();
-            }, DefaultPriority);
+                TryExecuteTask(task);//perform the task on the task's thread
+                RefreshTasks();
+            });//Default priority
         }
 
+        ///<summary>
+        ///No inlining support here
+        ///</summary>
         protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued)
         {
-            if (task == null)
-                throw new ArgumentNullException("task", "task must not be null!");
-            if (task.IsCompleted)
-                throw new InvalidOperationException("task has already been executed!");
-            if (taskWasPreviouslyQueued)//queued tasks must wait their turn
-                return false;
-            throw new NotImplementedException();
+            return false;
+        }
+
+        public void Dispose()
+        {
+            Console.WriteLine("Disposing...");
+            DeadlockChecker.Stop();//the method will block while waiting to actually stop
         }
 
         public override int MaximumConcurrencyLevel { get => MaxTaskCount; }
