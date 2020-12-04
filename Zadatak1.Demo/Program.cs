@@ -19,10 +19,10 @@ namespace Zadatak1.Demo
         /// </summary>
         static void Test1()
         {
-            const int delay = 200;
+            const int delay = 20;
             const int numberOfTasks = 10;
             SemaphoreSlim semaphore = new SemaphoreSlim(0);
-            TaskFactory tf = new TaskFactory(new ElfTaskScheduler(1, true, true));
+            TaskFactory tf = new TaskFactory(new ElfTaskScheduler(4, true, true));
             void BitOfSpam(int howMuch, string ofWhat, string name, int delayMs = delay)
             {
                 for (int i = 0; i < howMuch; ++i)
@@ -197,10 +197,10 @@ namespace Zadatak1.Demo
         }
         static void Main(string[] args)
         {
-            //Test1();
-            //Test2();
-            //Test3();
-            //Test4();
+            Test1();
+            Test2();
+            Test3();
+            Test4();
             Test5();
         }
     }

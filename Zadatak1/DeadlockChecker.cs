@@ -20,8 +20,6 @@ namespace Zadatak1
 
         private Thread Worker { get; set; } = null;
 
-        private int AllAreWaiting { get; set; } = 0;
-
         private int LockedTimes { get; set; } = 0;
 
         private int LockedPeriod { get; set; }
@@ -63,7 +61,10 @@ namespace Zadatak1
             foreach (var running in Ets.RunningTasks.Where(rt => rt.HasValue))
             {
                 var WantedByCurrent = running.Value.taskData.WantedResources;
-                var OthersAreHolding = Ets.RunningTasks.Where(rt => rt.HasValue && rt.Value.executingTask != running.Value.executingTask).Select(rt => rt.Value.taskData.HeldResources).Where(hr => hr.Count > 0);
+                var OthersAreHolding = Ets.RunningTasks
+                    .Where(rt => rt.HasValue && rt.Value.executingTask != running.Value.executingTask)
+                    .Select(rt => new List<string>(rt.Value.taskData.HeldResources))//Create explicit copies cause other threads are writing to the lists and I want a snapshot of the current state
+                    .Where(hr => hr.Count > 0);
                 if (Ets.PausedTasks.Count > 0)
                 {
                     var HeldByPaused = Ets.PausedTasks.Select(pt => pt.taskData.HeldResources).Aggregate((l1, l2) => l1.Union(l2).ToList());
@@ -82,6 +83,7 @@ namespace Zadatak1
                         var OthersHoldingList = OthersAreHolding.Count() == 1 ? OthersAreHolding.First() : OthersAreHolding.Where(l => l.Count > 0).Aggregate((l1, l2) => l1.Union(l2).ToList());
                         if (OthersHoldingList.Intersect(WantedByCurrent).Count() > 0)
                             blockedByRunning++;
+
                     }
                 }
             }

@@ -286,7 +286,9 @@ namespace Zadatak1
 
         public void Dispose()
         {
-            Console.WriteLine("Disposing...");
+#if DEBUG
+            Debug.WriteLine("Disposing...");
+#endif
             DeadlockChecker.Stop();//the method will block while waiting to actually stop
         }
 
