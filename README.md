@@ -205,7 +205,7 @@ ElfTaskScheduler.ElfTask segmenter(int i)//Introducing a function to capture the
     };
 }
 
-using (ElfTaskScheduler ets = new ElfTaskScheduler(Environment.ProcessorCount, true, true))
+using (ElfTaskScheduler ets = new ElfTaskScheduler(numberOfTasks, true, true))
 {
     //make sure this executes first, not touching the barrier, we only let workers do that, this task should end without affecting the barrier
     ets.ScheduleTask((td) => td.TakeResource("p", (ref dynamic p) => p = 0.0), 0);
@@ -223,4 +223,4 @@ using (ElfTaskScheduler ets = new ElfTaskScheduler(Environment.ProcessorCount, t
     });
     barrier.SignalAndWait();
 }
-``
+```
